@@ -1,9 +1,8 @@
 from types import SimpleNamespace
 
 import ndsl.dsl.gt4py_utils as utils
+from ndsl import Namelist, StencilFactory
 from ndsl.constants import X_DIM, Y_DIM, Z_DIM, Z_INTERFACE_DIM
-from ndsl.dsl.stencil import StencilFactory
-from ndsl.namelist import Namelist
 from ndsl.stencils.testing import ParallelTranslateBaseSlicing
 from pyFV3 import DryConvectiveAdjustment
 
@@ -96,11 +95,11 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
             "dims": [X_DIM, Y_DIM, Z_DIM],
             "units": "kg/kg",
         },
-        "qsgs_tke": {
-            "name": "turbulent_kinetic_energy",
-            "dims": [X_DIM, Y_DIM, Z_DIM],
-            "units": "m**2/s**2",
-        },
+        # "qsgs_tke": {
+        #     "name": "turbulent_kinetic_energy",
+        #     "dims": [X_DIM, Y_DIM, Z_DIM],
+        #     "units": "m**2/s**2",
+        # },
         "qcld": {
             "name": "cloud_fraction",
             "dims": [X_DIM, Y_DIM, Z_DIM],
@@ -116,11 +115,27 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
             "dims": [X_DIM, Y_DIM, Z_DIM],
             "units": "m/s**2",
         },
+        "t_dt": {
+            "name": "t_dt",
+            "dims": [X_DIM, Y_DIM, Z_DIM],
+            "units": "?",
+        },
+        "w_dt": {
+            "name": "w_dt",
+            "dims": [X_DIM, Y_DIM, Z_DIM],
+            "units": "?",
+        },
         "dt": {"dims": []},
+
+        "n_zfilter": {"dims": []},
+
+        "fv_sg_adj":{"dims": []},
+
+        "nwat":{"dims": []},
     }
     outputs = inputs.copy()
 
-    for name in ("dt", "pe", "peln", "delp", "delz", "pkz"):
+    for name in ("dt", "pe", "peln", "delp", "delz", "pkz", "n_zfilter", "fv_sg_adj", "nwat"):
         outputs.pop(name)
 
     def __init__(
@@ -131,6 +146,7 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
         *args,
         **kwargs,
     ):
+        print("RUNNING GEOS FVSUBGRIDZ TEST!!")
         super().__init__(grid, namelist, stencil_factory, *args, **kwargs)
         self._base.in_vars["data_vars"] = {
             "pe": {
@@ -163,11 +179,17 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
             "qsnow": {},
             "qgraupel": {},
             "qo3mr": {},
-            "qsgs_tke": {},
+            # "qsgs_tke": {},
             "qcld": {},
-            "u_dt": {},
-            "v_dt": {},
+            "u_dt": grid.compute_dict(),
+            "v_dt": grid.compute_dict(),
+            "t_dt": grid.compute_dict(),
+            "w_dt": grid.compute_dict(),
         }
+
+        self._base.in_vars["parameters"] = ["dt", "n_zfilter", "fv_sg_adj", "nwat"]
+
+        print("grid.compute_dict() = ", grid.compute_dict())
 
         self._base.out_vars = self._base.in_vars["data_vars"].copy()
         for var in ["pe", "peln", "delp", "delz", "pkz"]:
@@ -179,21 +201,25 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
         self.stencil_factory = stencil_factory
         self.namelist = namelist
 
-    def compute_parallel(self, inputs, communicator):
+    def compute_parallel(self, inputs, communicator):        
         state = self.state_from_inputs(inputs)
+        state_namespace = SimpleNamespace(**state)
+
         fvsubgridz = DryConvectiveAdjustment(
             self.stencil_factory,
             self.grid.quantity_factory,
-            self.namelist.nwat,
-            self.namelist.fv_sg_adj,
+            state_namespace.nwat,
+            state_namespace.fv_sg_adj,
             self.namelist.n_sponge,
             self.namelist.hydrostatic,
         )
-        state_namespace = SimpleNamespace(**state)
+
         fvsubgridz(
             state_namespace,
             state_namespace.u_dt,
             state_namespace.v_dt,
+            state_namespace.t_dt,
+            state_namespace.w_dt,
             state_namespace.dt,
         )
         return self.outputs_from_state(state)

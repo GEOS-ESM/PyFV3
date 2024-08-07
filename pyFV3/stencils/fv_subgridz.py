@@ -11,6 +11,7 @@ from gt4py.cartesian.gtscript import (
 )
 
 import ndsl.dsl.gt4py_utils as utils
+from ndsl import Quantity, QuantityFactory, StencilFactory
 from ndsl.constants import (
     C_ICE,
     C_LIQ,
@@ -25,12 +26,9 @@ from ndsl.constants import (
     Z_DIM,
     ZVIR,
 )
-from ndsl.dsl.stencil import StencilFactory
 from ndsl.dsl.typing import Float, FloatField
-from ndsl.initialization.allocator import QuantityFactory
-from ndsl.quantity import Quantity
+from ndsl.stencils.basic_operations import dim
 from pyFV3.dycore_state import DycoreState
-from pyFV3.stencils.basic_operations import dim
 
 
 RK = CP_AIR / RDGAS + 1.0
@@ -90,7 +88,7 @@ def init(
     q0_snow: FloatField,
     q0_graupel: FloatField,
     q0_o3mr: FloatField,
-    q0_sgs_tke: FloatField,
+    # q0_sgs_tke: FloatField,
     q0_cld: FloatField,
     qvapor: FloatField,
     qliquid: FloatField,
@@ -99,8 +97,9 @@ def init(
     qsnow: FloatField,
     qgraupel: FloatField,
     qo3mr: FloatField,
-    qsgs_tke: FloatField,
+    # qsgs_tke: FloatField,
     qcld: FloatField,
+    kbot: int,
 ):
     with computation(PARALLEL), interval(...):
         t0 = ta
@@ -115,10 +114,11 @@ def init(
         q0_snow = qsnow
         q0_graupel = qgraupel
         q0_o3mr = qo3mr
-        q0_sgs_tke = qsgs_tke
+        # q0_sgs_tke = qsgs_tke
         q0_cld = qcld
         gzh = 0.0
-    with computation(BACKWARD), interval(0, -1):
+
+    with computation(BACKWARD), interval(0, 25):
         # note only for nwat = 6
         cpm, cvm = standard_cm(
             cpm, cvm, q0_vapor, q0_liquid, q0_rain, q0_ice, q0_snow, q0_graupel
@@ -128,7 +128,6 @@ def init(
         static_energy = cpm * t0 + tmp
         total_energy = cvm * t0 + tmp
         gzh = gzh[0, 0, 1] - GRAV * delz
-
 
 @gtscript.function
 def qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel):
@@ -246,7 +245,7 @@ def m_loop(
     q0_snow: FloatField,
     q0_graupel: FloatField,
     q0_o3mr: FloatField,
-    q0_sgs_tke: FloatField,
+    # q0_sgs_tke: FloatField,
     q0_cld: FloatField,
     total_energy: FloatField,
     cpm: FloatField,
@@ -274,7 +273,7 @@ def m_loop(
         ri = 0.0
         ref = 0.0
     with computation(BACKWARD):
-        with interval(-1, None):
+        with interval(24, 25):
             ri, ri_ref = compute_richardson_number(
                 t0, q0_vapor, qcon, pkz, delp, peln, gz, u0, v0, xvir, t_max, t_min
             )
@@ -292,9 +291,9 @@ def m_loop(
                     mc, delp, q0_graupel, h0_graupel
                 )
                 q0_o3mr, h0_o3mr = kh_adjust_down(mc, delp, q0_o3mr, h0_o3mr)
-                q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
-                    mc, delp, q0_sgs_tke, h0_sgs_tke
-                )
+                # q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
+                #     mc, delp, q0_sgs_tke, h0_sgs_tke
+                # )
                 q0_cld, h0_cld = kh_adjust_down(mc, delp, q0_cld, h0_cld)
                 u0, h0_u = kh_adjust_down(mc, delp, u0, h0_u)
                 v0, h0_v = kh_adjust_down(mc, delp, v0, h0_v)
@@ -319,7 +318,7 @@ def m_loop(
                 total_energy,
                 static_energy,
             )
-        with interval(4, -1):
+        with interval(4, 24):
             if ri[0, 0, 1] < ri_ref[0, 0, 1]:
                 q0_vapor = kh_adjust_up(delp, h0_vapor, q0_vapor)
                 q0_liquid = kh_adjust_up(delp, h0_liquid, q0_liquid)
@@ -328,7 +327,7 @@ def m_loop(
                 q0_snow = kh_adjust_up(delp, h0_snow, q0_snow)
                 q0_graupel = kh_adjust_up(delp, h0_graupel, q0_graupel)
                 q0_o3mr = kh_adjust_up(delp, h0_o3mr, q0_o3mr)
-                q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
+                # q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
                 q0_cld = kh_adjust_up(delp, h0_cld, q0_cld)
                 qcon = qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel)
                 u0 = kh_adjust_up(delp, h0_u, u0)
@@ -366,9 +365,9 @@ def m_loop(
                     mc, delp, q0_graupel, h0_graupel
                 )
                 q0_o3mr, h0_o3mr = kh_adjust_down(mc, delp, q0_o3mr, h0_o3mr)
-                q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
-                    mc, delp, q0_sgs_tke, h0_sgs_tke
-                )
+                # q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
+                #     mc, delp, q0_sgs_tke, h0_sgs_tke
+                # )
                 q0_cld, h0_cld = kh_adjust_down(mc, delp, q0_cld, h0_cld)
                 u0, h0_u = kh_adjust_down(mc, delp, u0, h0_u)
                 v0, h0_v = kh_adjust_down(mc, delp, v0, h0_v)
@@ -405,7 +404,7 @@ def m_loop(
                 q0_snow = kh_adjust_up(delp, h0_snow, q0_snow)
                 q0_graupel = kh_adjust_up(delp, h0_graupel, q0_graupel)
                 q0_o3mr = kh_adjust_up(delp, h0_o3mr, q0_o3mr)
-                q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
+                # q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
                 q0_cld = kh_adjust_up(delp, h0_cld, q0_cld)
                 qcon = qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel)
                 u0 = kh_adjust_up(delp, h0_u, u0)
@@ -446,9 +445,9 @@ def m_loop(
                     mc, delp, q0_graupel, h0_graupel
                 )
                 q0_o3mr, h0_o3mr = kh_adjust_down(mc, delp, q0_o3mr, h0_o3mr)
-                q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
-                    mc, delp, q0_sgs_tke, h0_sgs_tke
-                )
+                # q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
+                #     mc, delp, q0_sgs_tke, h0_sgs_tke
+                # )
                 q0_cld, h0_cld = kh_adjust_down(mc, delp, q0_cld, h0_cld)
                 u0, h0_u = kh_adjust_down(mc, delp, u0, h0_u)
                 v0, h0_v = kh_adjust_down(mc, delp, v0, h0_v)
@@ -482,7 +481,7 @@ def m_loop(
                 q0_snow = kh_adjust_up(delp, h0_snow, q0_snow)
                 q0_graupel = kh_adjust_up(delp, h0_graupel, q0_graupel)
                 q0_o3mr = kh_adjust_up(delp, h0_o3mr, q0_o3mr)
-                q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
+                # q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
                 q0_cld = kh_adjust_up(delp, h0_cld, q0_cld)
                 qcon = qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel)
                 u0 = kh_adjust_up(delp, h0_u, u0)
@@ -522,9 +521,9 @@ def m_loop(
                     mc, delp, q0_graupel, h0_graupel
                 )
                 q0_o3mr, h0_o3mr = kh_adjust_down(mc, delp, q0_o3mr, h0_o3mr)
-                q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
-                    mc, delp, q0_sgs_tke, h0_sgs_tke
-                )
+                # q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
+                #     mc, delp, q0_sgs_tke, h0_sgs_tke
+                # )
                 q0_cld, h0_cld = kh_adjust_down(mc, delp, q0_cld, h0_cld)
                 u0, h0_u = kh_adjust_down(mc, delp, u0, h0_u)
                 v0, h0_v = kh_adjust_down(mc, delp, v0, h0_v)
@@ -558,7 +557,7 @@ def m_loop(
                 q0_snow = kh_adjust_up(delp, h0_snow, q0_snow)
                 q0_graupel = kh_adjust_up(delp, h0_graupel, q0_graupel)
                 q0_o3mr = kh_adjust_up(delp, h0_o3mr, q0_o3mr)
-                q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
+                # q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
                 q0_cld = kh_adjust_up(delp, h0_cld, q0_cld)
                 qcon = qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel)
                 u0 = kh_adjust_up(delp, h0_u, u0)
@@ -598,9 +597,9 @@ def m_loop(
                     mc, delp, q0_graupel, h0_graupel
                 )
                 q0_o3mr, h0_o3mr = kh_adjust_down(mc, delp, q0_o3mr, h0_o3mr)
-                q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
-                    mc, delp, q0_sgs_tke, h0_sgs_tke
-                )
+                # q0_sgs_tke, h0_sgs_tke = kh_adjust_down(
+                #     mc, delp, q0_sgs_tke, h0_sgs_tke
+                # )
                 q0_cld, h0_cld = kh_adjust_down(mc, delp, q0_cld, h0_cld)
                 u0, h0_u = kh_adjust_down(mc, delp, u0, h0_u)
                 v0, h0_v = kh_adjust_down(mc, delp, v0, h0_v)
@@ -634,7 +633,7 @@ def m_loop(
                 q0_snow = kh_adjust_up(delp, h0_snow, q0_snow)
                 q0_graupel = kh_adjust_up(delp, h0_graupel, q0_graupel)
                 q0_o3mr = kh_adjust_up(delp, h0_o3mr, q0_o3mr)
-                q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
+                # q0_sgs_tke = kh_adjust_up(delp, h0_sgs_tke, q0_sgs_tke)
                 q0_cld = kh_adjust_up(delp, h0_cld, q0_cld)
                 qcon = qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel)
                 u0 = kh_adjust_up(delp, h0_u, u0)
@@ -677,6 +676,8 @@ def finalize(
     w: FloatField,
     u_dt: FloatField,
     v_dt: FloatField,
+    t_dt: FloatField,
+    w_dt : FloatField,
     q0_vapor: FloatField,
     q0_liquid: FloatField,
     q0_rain: FloatField,
@@ -684,7 +685,7 @@ def finalize(
     q0_snow: FloatField,
     q0_graupel: FloatField,
     q0_o3mr: FloatField,
-    q0_sgs_tke: FloatField,
+    # q0_sgs_tke: FloatField,
     q0_cld: FloatField,
     qvapor: FloatField,
     qliquid: FloatField,
@@ -693,15 +694,15 @@ def finalize(
     qsnow: FloatField,
     qgraupel: FloatField,
     qo3mr: FloatField,
-    qsgs_tke: FloatField,
+    # qsgs_tke: FloatField,
     qcld: FloatField,
     timestep: Float,
 ):
     from __externals__ import fv_sg_adj, hydrostatic
 
-    with computation(PARALLEL), interval(...):
+    with computation(PARALLEL), interval(0,25):
         fra = timestep / fv_sg_adj
-        if fra < 1.0:
+        if fra <= 1.0:
             t0 = readjust_by_frac(t0, ta, fra)
             u0 = readjust_by_frac(u0, ua, fra)
             v0 = readjust_by_frac(v0, va, fra)
@@ -714,15 +715,18 @@ def finalize(
             q0_snow = readjust_by_frac(q0_snow, qsnow, fra)
             q0_graupel = readjust_by_frac(q0_graupel, qgraupel, fra)
             q0_o3mr = readjust_by_frac(q0_o3mr, qo3mr, fra)
-            q0_sgs_tke = readjust_by_frac(q0_sgs_tke, qsgs_tke, fra)
+            # q0_sgs_tke = readjust_by_frac(q0_sgs_tke, qsgs_tke, fra)
             q0_cld = readjust_by_frac(q0_cld, qcld, fra)
         rdt = 1.0 / timestep
         u_dt = rdt * (u0 - ua)
         v_dt = rdt * (v0 - va)
+        t_dt = rdt * (t0 - ta)
         ta = t0
         ua = u0
         va = v0
-        w = w0
+        if __INLINED(not hydrostatic):
+            w_dt = rdt * (w0 - w)
+            w = w0
         qvapor = q0_vapor
         qliquid = q0_liquid
         qrain = q0_rain
@@ -730,7 +734,7 @@ def finalize(
         qsnow = q0_snow
         qgraupel = q0_graupel
         qo3mr = q0_o3mr
-        qsgs_tke = q0_sgs_tke
+        # qsgs_tke = q0_sgs_tke
         qcld = q0_cld
 
 
@@ -766,7 +770,7 @@ class DryConvectiveAdjustment:
         ArgSpec("qice", "cloud_ice_mixing_ratio", "kg/kg", intent="inout"),
         ArgSpec("qgraupel", "graupel_mixing_ratio", "kg/kg", intent="inout"),
         ArgSpec("qo3mr", "ozone_mixing_ratio", "kg/kg", intent="inout"),
-        ArgSpec("qsgs_tke", "turbulent_kinetic_energy", "m**2/s**2", intent="inout"),
+        # ArgSpec("qsgs_tke", "turbulent_kinetic_energy", "m**2/s**2", intent="inout"),
         ArgSpec("qcld", "cloud_fraction", "", intent="inout"),
         ArgSpec(
             "u_dt", "eastward_wind_tendency_due_to_physics", "m/s**2", intent="inout"
@@ -839,7 +843,7 @@ class DryConvectiveAdjustment:
         )
 
         def make_quantity():
-            return quantity_factory.zeros([X_DIM, Y_DIM, Z_DIM], units="unknown")
+            return quantity_factory.zeros([X_DIM, Y_DIM, Z_DIM], units="unknown",dtype=Float)
 
         self._q0 = {}
         for tracername in utils.tracer_variables:
@@ -860,6 +864,8 @@ class DryConvectiveAdjustment:
         state: DycoreState,
         u_dt: Quantity,
         v_dt: Quantity,
+        t_dt: Quantity,
+        w_dt: Quantity,
         timestep: Float,
     ):
         """
@@ -898,7 +904,7 @@ class DryConvectiveAdjustment:
             self._q0["qsnow"],
             self._q0["qgraupel"],
             self._q0["qo3mr"],
-            self._q0["qsgs_tke"],
+            # self._q0["qsgs_tke"],
             self._q0["qcld"],
             state.qvapor,
             state.qliquid,
@@ -907,8 +913,9 @@ class DryConvectiveAdjustment:
             state.qsnow,
             state.qgraupel,
             state.qo3mr,
-            state.qsgs_tke,
+            # state.qsgs_tke,
             state.qcld,
+            state.n_zfilter,
         )
 
         for n in range(self._m):
@@ -929,13 +936,13 @@ class DryConvectiveAdjustment:
                 self._q0["qsnow"],
                 self._q0["qgraupel"],
                 self._q0["qo3mr"],
-                self._q0["qsgs_tke"],
+                # self._q0["qsgs_tke"],
                 self._q0["qcld"],
                 self._tmp_total_energy,
                 self._tmp_cpm,
                 self._tmp_cvm,
-                t_min,
-                self._ratios[n],
+                Float(t_min),
+                Float(self._ratios[n]),
             )
 
         self._finalize_stencil(
@@ -949,6 +956,8 @@ class DryConvectiveAdjustment:
             state.w,
             u_dt,
             v_dt,
+            t_dt,
+            w_dt,
             self._q0["qvapor"],
             self._q0["qliquid"],
             self._q0["qrain"],
@@ -956,7 +965,7 @@ class DryConvectiveAdjustment:
             self._q0["qsnow"],
             self._q0["qgraupel"],
             self._q0["qo3mr"],
-            self._q0["qsgs_tke"],
+            # self._q0["qsgs_tke"],
             self._q0["qcld"],
             state.qvapor,
             state.qliquid,
@@ -965,7 +974,7 @@ class DryConvectiveAdjustment:
             state.qsnow,
             state.qgraupel,
             state.qo3mr,
-            state.qsgs_tke,
+            # state.qsgs_tke,
             state.qcld,
-            timestep,
+            Float(timestep),
         )

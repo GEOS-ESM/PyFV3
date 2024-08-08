@@ -5,6 +5,7 @@ import gt4py.cartesian.gtscript as gtscript
 from gt4py.cartesian.gtscript import (
     __INLINED,
     BACKWARD,
+    FORWARD,
     PARALLEL,
     computation,
     interval,
@@ -99,7 +100,8 @@ def init(
     qo3mr: FloatField,
     # qsgs_tke: FloatField,
     qcld: FloatField,
-    kbot: int,
+    kbot: int, # Note, currently this implementation assumes that there will always be a kbot value
+               # Fortran code has kbot as an optional value
 ):
     with computation(PARALLEL), interval(...):
         t0 = ta
@@ -117,17 +119,22 @@ def init(
         # q0_sgs_tke = qsgs_tke
         q0_cld = qcld
         gzh = 0.0
+        mask = 0
 
-    with computation(BACKWARD), interval(0, 25):
+    with computation(FORWARD), interval(1,None):
+        mask = mask[0,0,-1] + 1
+
+    with computation(BACKWARD), interval(0, -1):
         # note only for nwat = 6
-        cpm, cvm = standard_cm(
-            cpm, cvm, q0_vapor, q0_liquid, q0_rain, q0_ice, q0_snow, q0_graupel
-        )
-        gz = gzh[0, 0, 1] - G2 * delz
-        tmp = tvol(gz, u0, v0, w0)
-        static_energy = cpm * t0 + tmp
-        total_energy = cvm * t0 + tmp
-        gzh = gzh[0, 0, 1] - GRAV * delz
+        if(mask < kbot):
+            cpm, cvm = standard_cm(
+                cpm, cvm, q0_vapor, q0_liquid, q0_rain, q0_ice, q0_snow, q0_graupel
+            )
+            gz = gzh[0, 0, 1] - G2 * delz
+            tmp = tvol(gz, u0, v0, w0)
+            static_energy = cpm * t0 + tmp
+            total_energy = cvm * t0 + tmp
+            gzh = gzh[0, 0, 1] - GRAV * delz
 
 @gtscript.function
 def qcon_func(q0_liquid, q0_ice, q0_snow, q0_rain, q0_graupel):
@@ -252,6 +259,7 @@ def m_loop(
     cvm: FloatField,
     t_min: Float,
     ratio: Float,
+    kbot: int,
 ):
     from __externals__ import t_max, xvir
 
@@ -272,8 +280,13 @@ def m_loop(
         h0_total_energy = 0.0
         ri = 0.0
         ref = 0.0
-    with computation(BACKWARD):
-        with interval(24, 25):
+        mask = 0
+    
+    with computation(FORWARD), interval(1,None):
+        mask = mask[0,0,-1] + 1
+
+    with computation(BACKWARD), interval(4,None):
+        if(mask == (kbot-1)):
             ri, ri_ref = compute_richardson_number(
                 t0, q0_vapor, qcon, pkz, delp, peln, gz, u0, v0, xvir, t_max, t_min
             )
@@ -318,7 +331,8 @@ def m_loop(
                 total_energy,
                 static_energy,
             )
-        with interval(4, 24):
+    with computation(BACKWARD), interval(4,-1):
+        if(mask < (kbot-1)):
             if ri[0, 0, 1] < ri_ref[0, 0, 1]:
                 q0_vapor = kh_adjust_up(delp, h0_vapor, q0_vapor)
                 q0_liquid = kh_adjust_up(delp, h0_liquid, q0_liquid)
@@ -392,6 +406,7 @@ def m_loop(
                 total_energy,
                 static_energy,
             )
+    with computation(BACKWARD):
         with interval(3, 4):
             # TODO: this is repetitive, but using functions did not work as
             # expected. spend some more time here so not so much needs
@@ -697,45 +712,52 @@ def finalize(
     # qsgs_tke: FloatField,
     qcld: FloatField,
     timestep: Float,
+    kbot: int,
 ):
     from __externals__ import fv_sg_adj, hydrostatic
 
-    with computation(PARALLEL), interval(0,25):
-        fra = timestep / fv_sg_adj
-        if fra <= 1.0:
-            t0 = readjust_by_frac(t0, ta, fra)
-            u0 = readjust_by_frac(u0, ua, fra)
-            v0 = readjust_by_frac(v0, va, fra)
+    with computation(PARALLEL), interval(...):
+        mask = 0
+    with computation(FORWARD), interval(1,None):
+        mask = mask[0,0,-1] + 1
+
+    with computation(PARALLEL), interval(...):
+        if(mask < kbot):
+            fra = timestep / fv_sg_adj
+            if fra <= 1.0:
+                t0 = readjust_by_frac(t0, ta, fra)
+                u0 = readjust_by_frac(u0, ua, fra)
+                v0 = readjust_by_frac(v0, va, fra)
+                if __INLINED(not hydrostatic):
+                    w0 = readjust_by_frac(w0, w, fra)
+                q0_vapor = readjust_by_frac(q0_vapor, qvapor, fra)
+                q0_liquid = readjust_by_frac(q0_liquid, qliquid, fra)
+                q0_rain = readjust_by_frac(q0_rain, qrain, fra)
+                q0_ice = readjust_by_frac(q0_ice, qice, fra)
+                q0_snow = readjust_by_frac(q0_snow, qsnow, fra)
+                q0_graupel = readjust_by_frac(q0_graupel, qgraupel, fra)
+                q0_o3mr = readjust_by_frac(q0_o3mr, qo3mr, fra)
+                # q0_sgs_tke = readjust_by_frac(q0_sgs_tke, qsgs_tke, fra)
+                q0_cld = readjust_by_frac(q0_cld, qcld, fra)
+            rdt = 1.0 / timestep
+            u_dt = rdt * (u0 - ua)
+            v_dt = rdt * (v0 - va)
+            t_dt = rdt * (t0 - ta)
+            ta = t0
+            ua = u0
+            va = v0
             if __INLINED(not hydrostatic):
-                w0 = readjust_by_frac(w0, w, fra)
-            q0_vapor = readjust_by_frac(q0_vapor, qvapor, fra)
-            q0_liquid = readjust_by_frac(q0_liquid, qliquid, fra)
-            q0_rain = readjust_by_frac(q0_rain, qrain, fra)
-            q0_ice = readjust_by_frac(q0_ice, qice, fra)
-            q0_snow = readjust_by_frac(q0_snow, qsnow, fra)
-            q0_graupel = readjust_by_frac(q0_graupel, qgraupel, fra)
-            q0_o3mr = readjust_by_frac(q0_o3mr, qo3mr, fra)
-            # q0_sgs_tke = readjust_by_frac(q0_sgs_tke, qsgs_tke, fra)
-            q0_cld = readjust_by_frac(q0_cld, qcld, fra)
-        rdt = 1.0 / timestep
-        u_dt = rdt * (u0 - ua)
-        v_dt = rdt * (v0 - va)
-        t_dt = rdt * (t0 - ta)
-        ta = t0
-        ua = u0
-        va = v0
-        if __INLINED(not hydrostatic):
-            w_dt = rdt * (w0 - w)
-            w = w0
-        qvapor = q0_vapor
-        qliquid = q0_liquid
-        qrain = q0_rain
-        qice = q0_ice
-        qsnow = q0_snow
-        qgraupel = q0_graupel
-        qo3mr = q0_o3mr
-        # qsgs_tke = q0_sgs_tke
-        qcld = q0_cld
+                w_dt = rdt * (w0 - w)
+                w = w0
+            qvapor = q0_vapor
+            qliquid = q0_liquid
+            qrain = q0_rain
+            qice = q0_ice
+            qsnow = q0_snow
+            qgraupel = q0_graupel
+            qo3mr = q0_o3mr
+            # qsgs_tke = q0_sgs_tke
+            qcld = q0_cld
 
 
 ArgSpec = collections.namedtuple(
@@ -882,6 +904,8 @@ class DryConvectiveAdjustment:
         else:
             t_min = T2_MIN
 
+        print("n_zfilter = ", state.n_zfilter, type(state.n_zfilter))
+
         self._init_stencil(
             self._tmp_gz,
             self._tmp_t0,
@@ -915,7 +939,7 @@ class DryConvectiveAdjustment:
             state.qo3mr,
             # state.qsgs_tke,
             state.qcld,
-            state.n_zfilter,
+            int(state.n_zfilter),
         )
 
         for n in range(self._m):
@@ -943,6 +967,7 @@ class DryConvectiveAdjustment:
                 self._tmp_cvm,
                 Float(t_min),
                 Float(self._ratios[n]),
+                int(state.n_zfilter),
             )
 
         self._finalize_stencil(
@@ -977,4 +1002,5 @@ class DryConvectiveAdjustment:
             # state.qsgs_tke,
             state.qcld,
             Float(timestep),
+            int(state.n_zfilter),
         )

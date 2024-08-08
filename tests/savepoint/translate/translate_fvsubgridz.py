@@ -126,16 +126,23 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
             "units": "?",
         },
         "dt": {"dims": []},
-
         "n_zfilter": {"dims": []},
-
-        "fv_sg_adj":{"dims": []},
-
-        "nwat":{"dims": []},
+        "fv_sg_adj": {"dims": []},
+        "nwat": {"dims": []},
     }
     outputs = inputs.copy()
 
-    for name in ("dt", "pe", "peln", "delp", "delz", "pkz", "n_zfilter", "fv_sg_adj", "nwat"):
+    for name in (
+        "dt",
+        "pe",
+        "peln",
+        "delp",
+        "delz",
+        "pkz",
+        "n_zfilter",
+        "fv_sg_adj",
+        "nwat",
+    ):
         outputs.pop(name)
 
     def __init__(
@@ -201,7 +208,7 @@ class TranslateFVSubgridZ(ParallelTranslateBaseSlicing):
         self.stencil_factory = stencil_factory
         self.namelist = namelist
 
-    def compute_parallel(self, inputs, communicator):        
+    def compute_parallel(self, inputs, communicator):
         state = self.state_from_inputs(inputs)
         state_namespace = SimpleNamespace(**state)
 
